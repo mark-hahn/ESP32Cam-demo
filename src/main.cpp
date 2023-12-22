@@ -6,14 +6,13 @@
 #include "esp32/rom/rtc.h"
 #include <WiFi.h>
 #include <WebServer.h>
-#include <HTTPClient.h>
 #include "soc/soc.h"           // brownout
 #include "soc/rtc_cntl_reg.h"  // brownout
 
 #define SSID_NAME "hahn-fi"
 #define SSID_PASWORD "90-NBVcvbasd"
 
-#define serialSpeed 921600
+#define SERIAL_SPEED 921600
 
 bool initialiseCamera(bool); 
 bool cameraImageSettings();
@@ -83,21 +82,6 @@ void verbose_print_reset_reason(int reason) {
   }
 }
 
-
-// -------
-//  -LOOP  LOOP  LOOP  LOOP  LOOP  LOOP  LOOP
-// -------
-
-
-
-
-// -------
-//  Initialise the camera
-// -------
-// returns TRUE if successful
-// reset - if set to 1 all settings are reconfigured
-//  if set to zero you can change the settings and call this procedure to apply them
-
 bool initialiseCamera(bool reset) {
 
 // set the camera parameters in 'config'
@@ -129,7 +113,7 @@ if (reset) {
   config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
   //config.fb_location = CAMERA_FB_IN_PSRAM;  // store the captured frame in PSRAM
   config.fb_count = 1;  // if more than one, i2s runs in continuous mode. Use only with JPEG
-}
+} // if reset
 
   esp_err_t camerr = esp_camera_init(&config);  // initialise the camera
   if (camerr != ESP_OK) {
@@ -138,7 +122,7 @@ if (reset) {
 
   cameraImageSettings();  // apply the camera image settings
 
-  return (camerr == ESP_OK);  // return boolean result of camera initialisation
+  return (camerr == ESP_OK);
 }
 
 
@@ -147,12 +131,8 @@ if (reset) {
 // -------
 // Adjust image properties (brightness etc.)
 // Defaults to auto adjustments if exposure and gain are both set to zero
-// - Returns TRUE if successful
-// More info: https://randomnerdtutorials.com/esp32-cam-ov2640-camera-settings/
-//  interesting info on exposure times here: https://github.com/raduprv/esp32-cam_ov2640-timelapse
 
 bool cameraImageSettings() {
-
   Serial.println("Applying camera settings");
 
   sensor_t *s = esp_camera_sensor_get();
@@ -178,10 +158,6 @@ bool cameraImageSettings() {
   s->set_agc_gain(s, cameraImageGain);  // set gain manually (0 - 30)
   s->set_aec_value(s, cameraImageExposure);  // set exposure manually  (0-1200)
   }
-  
-  //s->set_vflip(s, 1);  // flip image vertically
-  //s->set_hmirror(s, 1);  // flip image horizontally
-
   return 1;
 }  // cameraImageSettings
 
@@ -291,6 +267,7 @@ bool handleJPG() {
     Serial.println("Error: failed to capture image");
     return 0;
   }
+  else Serial.println("Image captured");
 
   // html to send a jpg
   const char HEADER[] = "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: *\r\n";
@@ -304,22 +281,17 @@ bool handleJPG() {
 
   // send the captured jpg data
   client.write((char *)fb->buf, fb->len);
-
-  // close network client connection
   delay(3);
   client.stop();
 
   esp_camera_fb_return(fb);  // return camera frame buffer
-
   return 1;
-
 }  // handleJPG
 
 void setup() {
-
-  Serial.begin(serialSpeed); 
+  Serial.begin(SERIAL_SPEED); 
   Serial.println();
-  Serial.printf("Starting");
+  Serial.printf("Setup");
 
   verbose_print_reset_reason(rtc_get_reset_reason(0));
   verbose_print_reset_reason(rtc_get_reset_reason(1));
@@ -333,8 +305,8 @@ void setup() {
 
   WiFi.begin(SSID_NAME, SSID_PASWORD);
   while (WiFi.status() != WL_CONNECTED) {
-  delay(500);
-  Serial.print(".");
+    delay(500);
+    Serial.print(".");
   }
   Serial.print("\nWiFi connected, ");
   Serial.print("IP address: ");
@@ -346,19 +318,18 @@ void setup() {
   server.onNotFound(handleNotFound);  // invalid url requested
 
  // set up camera
-  Serial.print(("\nInitialising camera: "));
-  if (initialiseCamera(1)) {  // apply settings from 'config' and start camera
-  Serial.println("OK");
+  if (initialiseCamera(1)) {
+    Serial.println("initializeCamera OK");
   }
   else {
-  Serial.println("failed");
+    Serial.println("initialiseCamera failed");
   }
   // Serial.println("Configuring watchdog timer");
   // esp_task_wdt_init(WDT_TIMEOUT, true);
   // esp_task_wdt_add(NULL);  //add current thread to WDT watch  
 
  // startup complete
-  Serial.println("\nStarted...");
+  Serial.println("\nReady for jpg page load ...");
   delay(200);
 }  // setup
 
