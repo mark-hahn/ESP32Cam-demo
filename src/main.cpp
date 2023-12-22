@@ -13,23 +13,13 @@
 #define SSID_PASWORD "90-NBVcvbasd"
 
 #define SERIAL_SPEED 921600
+// #define WDT_TIMEOUT 10
 
-bool initialiseCamera(bool); 
-bool cameraImageSettings();
-void changeResolution();
-void handleNotFound();
-bool handleJPG();
+#define EXPOSURE 0       // 0 - 1200
+#define GAIN 0           // 0 - 30
+#define BRIGHTNESS 0     // Image brightness (-2 to +2)
+#define DEINIT_DELAY 200 // delay in deinit
 
-// ------
-//  -SETTINGS
-// ------
-
-//  #define WDT_TIMEOUT 10
-int cameraImageExposure = 0;  // Camera exposure (0 - 1200)  If gain and exposure both set to zero then auto adjust is enabled
-int cameraImageGain = 0;  // Image gain (0 - 30)
-int cameraImageBrightness = 0;  // Image brightness (-2 to +2)
-const int camChangeDelay = 200;  // delay when deinit camera executed
-#define CAMERA_MODEL_AI_THINKER
 #define PWDN_GPIO_NUM  32  // power to camera (on/off)
 #define RESET_GPIO_NUM  -1  // -1 = not used
 #define XCLK_GPIO_NUM  0
@@ -46,22 +36,14 @@ const int camChangeDelay = 200;  // delay when deinit camera executed
 #define VSYNC_GPIO_NUM  25  // vsync_pin
 #define HREF_GPIO_NUM  23  // href_pin
 #define PCLK_GPIO_NUM  22  // pixel_clock_pin
+
 camera_config_t config;  // camera settings
 
 WebServer server(80);  // serve web pages on port 80
 
-enum rst_reason {
-  REASON_DEFAULT_RST      = 0,    /* normal startup by power on */
-  REASON_WDT_RST          = 1,    /* hardware watch dog reset */
-  REASON_EXCEPTION_RST    = 2,    /* exception reset, GPIO status won’t change */
-  REASON_SOFT_WDT_RST     = 3,    /* software watch dog reset, GPIO status won’t change */
-  REASON_SOFT_RESTART     = 4,    /* software restart ,system_restart , GPIO status won’t change */
-  REASON_DEEP_SLEEP_AWAKE = 5,    /* wake up from deep-sleep */
-  REASON_EXT_SYS_RST      = 6     /* external system reset */
-};
-
 void verbose_print_reset_reason(int reason) {
   if(reason < 2) return;
+  Serial.print("Reset reason: ");
   switch ( reason) {
     case 1  : Serial.println ("Vbat power on reset");break;
     case 3  : Serial.println ("Software reset digital core");break;
@@ -82,8 +64,32 @@ void verbose_print_reset_reason(int reason) {
   }
 }
 
-bool initialiseCamera(bool reset) {
+bool cameraImageSettings() {
+  Serial.println("Applying camera settings");
+  sensor_t *s = esp_camera_sensor_get();
+  if (s == NULL) {
+  Serial.println("Error: problem reading camera sensor settings");
+  return 0;
+  }
+  // if both set to zero enable auto adjust
+  if (EXPOSURE == 0 && GAIN == 0) {
+    s->set_gain_ctrl(s, 1);  // auto gain on
+    s->set_exposure_ctrl(s, 1);  // auto exposure on 
+    s->set_awb_gain(s, 1);  // Auto White Balance enable (0 or 1)
+    s->set_brightness(s, BRIGHTNESS);  // (-2 to 2) - set brightness
+    } else {
+    // Apply manual settings
+    s->set_gain_ctrl(s, 0);  // auto gain (0 or 1)
+    s->set_awb_gain(s, 1);   // Auto White Balance (0 or 1)
+    s->set_exposure_ctrl(s, 0);        // auto exposure (0 or 1)
+    s->set_brightness(s, BRIGHTNESS);  // (-2 to 2)
+    s->set_agc_gain(s, GAIN);          // (0 - 30)
+    s->set_aec_value(s, EXPOSURE);     // (0-1200)
+  }
+  return 1;
+}  // cameraImageSettings
 
+bool initializeCamera(bool reset) {
 // set the camera parameters in 'config'
 if (reset) {
   config.ledc_channel = LEDC_CHANNEL_0;
@@ -106,60 +112,21 @@ if (reset) {
   config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 10000000;  // XCLK 20MHz or 10MHz for OV2640 double FPS (Experimental)
   config.pixel_format = PIXFORMAT_JPEG;  // colour jpg format
-  config.frame_size = FRAMESIZE_SXGA;  // Image sizes: 160x120 (QQVGA), 128x160 (QQVGA2), 176x144 (QCIF), 240x176 (HQVGA), 320x240 (QVGA),
-  //  400x296 (CIF), 640x480 (VGA, default), 800x600 (SVGA), 1024x768 (XGA), 1280x1024 (SXGA),
-  //  1600x1200 (UXGA)
-  config.jpeg_quality = 10;  // 0-63 lower number means higher quality (can cause failed image capture if set too low at higher resolutions)
+  config.frame_size = FRAMESIZE_SXGA;
+  config.jpeg_quality = 10;  // 0-63 lower means higher quality
   config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
-  //config.fb_location = CAMERA_FB_IN_PSRAM;  // store the captured frame in PSRAM
-  config.fb_count = 1;  // if more than one, i2s runs in continuous mode. Use only with JPEG
+  config.fb_location = CAMERA_FB_IN_PSRAM;
+  config.fb_count = 1;
 } // if reset
 
-  esp_err_t camerr = esp_camera_init(&config);  // initialise the camera
-  if (camerr != ESP_OK) {
-  Serial.printf("ERROR: Camera init failed with error 0x%x", camerr);
-  }
+  esp_err_t camErr = esp_camera_init(&config);
+  if (camErr != ESP_OK)
+     Serial.printf("ERROR: Camera init failed: 0x%x", camErr);
 
   cameraImageSettings();  // apply the camera image settings
 
-  return (camerr == ESP_OK);
+  return (camErr == ESP_OK);
 }
-
-
-// -------
-//  -Change camera image settings
-// -------
-// Adjust image properties (brightness etc.)
-// Defaults to auto adjustments if exposure and gain are both set to zero
-
-bool cameraImageSettings() {
-  Serial.println("Applying camera settings");
-
-  sensor_t *s = esp_camera_sensor_get();
-  // something to try?:  if (s->id.PID == OV3660_PID)
-  if (s == NULL) {
-  Serial.println("Error: problem reading camera sensor settings");
-  return 0;
-  }
-
-  // if both set to zero enable auto adjust
-  if (cameraImageExposure == 0 && cameraImageGain == 0) {
-  // enable auto adjust
-  s->set_gain_ctrl(s, 1);  // auto gain on
-  s->set_exposure_ctrl(s, 1);  // auto exposure on 
-  s->set_awb_gain(s, 1);  // Auto White Balance enable (0 or 1)
-  s->set_brightness(s, cameraImageBrightness);  // (-2 to 2) - set brightness
-  } else {
-  // Apply manual settings
-  s->set_gain_ctrl(s, 0);  // auto gain off
-  s->set_awb_gain(s, 1);  // Auto White Balance enable (0 or 1)
-  s->set_exposure_ctrl(s, 0);  // auto exposure off
-  s->set_brightness(s, cameraImageBrightness);  // (-2 to 2) - set brightness
-  s->set_agc_gain(s, cameraImageGain);  // set gain manually (0 - 30)
-  s->set_aec_value(s, cameraImageExposure);  // set exposure manually  (0-1200)
-  }
-  return 1;
-}  // cameraImageSettings
 
 // -------
 //  send standard html header (i.e. start of web page)
@@ -217,12 +184,12 @@ void resetCamera(bool type = 0) {
   delay(300);
   digitalWrite(PWDN_GPIO_NUM, LOW);
   delay(300);
-  initialiseCamera(1);
+  initializeCamera(1);
   } else {
   // reset via software (handy if you wish to change resolution or image type etc. - see test procedure)
   esp_camera_deinit();
-  delay(camChangeDelay);
-  initialiseCamera(1);
+  delay(DEINIT_DELAY);
+  initializeCamera(1);
   }
 }
 
@@ -318,11 +285,11 @@ void setup() {
   server.onNotFound(handleNotFound);  // invalid url requested
 
  // set up camera
-  if (initialiseCamera(1)) {
+  if (initializeCamera(1)) {
     Serial.println("initializeCamera OK");
   }
   else {
-    Serial.println("initialiseCamera failed");
+    Serial.println("initializeCamera failed");
   }
   // Serial.println("Configuring watchdog timer");
   // esp_task_wdt_init(WDT_TIMEOUT, true);
