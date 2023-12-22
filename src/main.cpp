@@ -1,71 +1,14 @@
-/*********
-*
-*  ESP32Cam development board demo sketch using Arduino IDE or PlatformIO
-*  Github: https://github.com/alanesq/ESP32Cam-demo
-*
-*  Tested with ESP32 board manager version  2.0.14
-*
-*  Starting point sketch for projects using the esp32cam development board with the following features
-*  web server with live video streaming and RGB data from camera demonstrated.
-*  sd card support using 1-bit mode (data pins are usually 2,4,12&13 but using 1bit mode only uses pin 2)
-*  flash led is still available for use (pin 4) and does not flash when accessing sd card
-*  Stores image in Spiffs if no sd card present
-*  PWM control of the illumination/flash LED
-* 
-*  If ota.h file is in the sketch folder you can enable OTA updating of this sketch by setting '#define ENABLE_OTA 1'
-*  in settings section.  You can then update the sketch with a BIN file via OTA by accessing page  http://x.x.x.x/ota
-*  This can make updating the sketch more convenient, especially if you have installed the camera in a case etc.
-*
-*  GPIO:
-*  You can use io pins 13 and 12 for input or output (but 12 must not be high at boot)
-*  You could also use pins 1 & 3 if you do not use Serial (disable serialDebug in the settings below)
-*  Pins 14, 2 & 15 should be ok to use if you are not using an SD Card
-*  More info:  https://randomnerdtutorials.com/esp32-cam-ai-thinker-pinout/
-*
-*  You can use a MCP23017 io expander chip to give 16 gpio lines by enabling 'useMCP23017' in the setup section and connecting
-*  the i2c pins to 12 and 13 on the esp32cam module.  Note: this requires the adafruit MCP23017 library to be installed.
-*
-*  Created using the Arduino IDE with ESP32 module installed, no additional libraries required
-*  ESP32 support for Arduino IDE: https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
-*
-*  Info on the esp32cam board:  https://randomnerdtutorials.com/esp32-cam-video-streaming-face-recognition-arduino-ide/
-*  https://github.com/espressif/esp32-camera
-*
-*  To see a more advanced sketch along the same format as this one have a look at https://github.com/alanesq/CameraWifiMotion
-*  which includes email support, FTP, OTA updates and motion detection
-*
-*  esp32cam-demo is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
-*  implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-*
-*  https://alanesq.github.io/
-*
-*********/
+// https://github.com/alanesq/ESP32Cam-demo
 
-#if !defined ESP32
- #error This sketch is only for an ESP32 Camera module
-#endif
-
-#include "esp_camera.h"  // https://github.com/espressif/esp32-camera
 #include <Arduino.h>
+#include "esp_camera.h" 
 // watchdog timer  - see: https://iotassistant.io/esp32/enable-hardware-watchdog-timer-esp32-arduino-ide/
 #include <esp_task_wdt.h>  
 
-//  ---------------------------------------------------------------------------------------------------------
-
-
-
-//  ====================================== 
-//  Enter your wifi settings
-//  ====================================== 
-
-  #define SSID_NAME "hahn-fi"
+#define SSID_NAME "hahn-fi"
+#define SSID_PASWORD "90-NBVcvbasd"
   
-  #define SSID_PASWORD "90-NBVcvbasd"
-  
-  #define ENABLE_OTA 0  // If OTA updating of this sketch is enabled (requires ota.h file)
-  const String OTAPassword = "password";  // Password for performing OTA update (i.e. http://x.x.x.x/ota)
-
-//  ---------------------------------------------------------------------------------------------------------
+//  ----------
 
   // Required by PlatformIO
 
@@ -73,7 +16,6 @@
   bool initialiseCamera(bool);  // this sets up and enables the camera (if bool=1 standard settings are applied but 0 allows you to apply custom settings)
   bool cameraImageSettings();  // this applies the image settings to the camera (brightness etc.)
   void changeResolution();  // this changes the capture frame size
-  String localTime();  // returns the current time as a String
   void flashLED(int);  // flashes the onboard indicator led
   byte storeImage();  // stores an image in Spiffs or SD card
   void handleRoot();  // the root web page
@@ -81,11 +23,9 @@
   bool handleImg();  // Display a previously stored image 
   void handleNotFound();  // if invalid web page is requested
   void readRGBImage();  // demo capturing an image and reading its raw RGB data
-  bool getNTPtime(int);  // handle the NTP real time clock
   bool handleJPG();  // display a raw jpg image
   void handleJpeg();  // display a raw jpg image which periodically refreshes
   void handleStream();  // stream live video (note: this can get the camera very hot)
-  int requestWebPage(String*, String*, int);  // procedure allowing the sketch to read a web page its self
   void handleTest();  // test procedure for experimenting with bits of code etc.
   void brightLed(byte);  // turn the onboard flash LED on/off with varying brightness
   void setupFlashPWM();  // set up the PWM for the above flash
@@ -94,9 +34,9 @@
   void resize_esp32cam_image_buffer(uint8_t*, int, int, uint8_t*, int, int);  // this resizes a captured grayscale image (used by above)
 
 
-// ---------------------------------------------------------------
+// ------
 //  -SETTINGS
-// ---------------------------------------------------------------
+// ------
 
  char* stitle = "ESP32Cam-demo";  // title of this sketch
  char* sversion = "02Nov23";  // Sketch version
@@ -109,7 +49,7 @@
  uint16_t imagerefresh = 2;  // how often to refresh the image on root web page (seconds)
 
  const bool serialDebug = 1;  // show debug info. on serial port (1=enabled, disable if using pins 1 and 3 as gpio)
- const int serialSpeed = 115200;  // Serial data speed to use
+ const int serialSpeed = 921600;  // Serial data speed to use
 
  #define useMCP23017 0  // set if MCP23017 IO expander chip is being used (on pins 12 and 13)
 
@@ -177,14 +117,6 @@ framesize_t FRAME_SIZE_IMAGE = cyclingRes[0];
 #include <HTTPClient.h>
 #include "driver/ledc.h"  // used to configure pwm on illumination led
 
-// NTP - Internet time - see - https://randomnerdtutorials.com/esp32-ntp-timezones-daylight-saving/
-  #include "time.h"
-  struct tm timeinfo;
-  const char* ntpServer = "pool.ntp.org";
-  const char* TZ_INFO  = "GMT+0BST-1,M3.5.0/01:00:00,M10.5.0/02:00:00";  // enter your time zone (https://remotemonitoringsystems.ca/time-zone-abbreviations.php)
-  long unsigned lastNTPtime;
-  time_t now;
-  
 // spiffs used to store images if no sd card present
  #include <SPIFFS.h>
  #include <FS.h>  // gives file access on spiffs
@@ -224,9 +156,9 @@ WebServer server(80);  // serve web pages on port 80
   #include "ota.h"  // Over The Air updates (OTA)
   #endif
 
-// ---------------------------------------------------------------
+// ------
 //  -SETUP  SETUP  SETUP  SETUP  SETUP  SETUP
-// ---------------------------------------------------------------
+// ------
 
 void setup() {
 
@@ -235,9 +167,9 @@ void setup() {
   // Serial.setDebugOutput(true);
 
   Serial.println("\n\n\n");  // line feeds
-  Serial.println("-----------------------------------");
+  Serial.println("----------------");
   Serial.printf("Starting - %s - %s \n", stitle, sversion);
-  Serial.println("-----------------------------------");
+  Serial.println("----------------");
   // Serial.print("Reset reason: " + ESP.getResetReason());
  }
 
@@ -283,16 +215,6 @@ void setup() {
 #if ENABLE_OTA  
   server.on("/ota", handleOTA);  // ota updates web page
 #endif  
-
- // NTP - internet time
-  if (serialDebug) Serial.println("\nGetting real time (NTP)");
-  configTime(0, 0, ntpServer);
-  setenv("TZ", TZ_INFO, 1);
-  if (getNTPtime(10)) {  // wait up to 10 sec to sync
-  } else {
-  if (serialDebug) Serial.println("Time not set");
-  }
-  lastNTPtime = time(&now);
 
  // set up camera
   if (serialDebug) Serial.print(("\nInitialising camera: "));
@@ -393,34 +315,16 @@ setupFlashPWM();  // configure PWM for the illumination LED
 }  // setup
 
 
-// ----------------------------------------------------------------
+// -------
 //  -LOOP  LOOP  LOOP  LOOP  LOOP  LOOP  LOOP
-// ----------------------------------------------------------------
+// -------
 
 
 void loop() {
 
  server.handleClient();  // handle any incoming web page requests
 
-
-
-
-
-
  //  <<< YOUR CODE HERE >>>
-
-
-
-
-
-
-//  //  Capture an image and save to sd card every 5 seconds (i.e. time lapse)
-//  static uint32_t lastCamera = millis();
-//  if ( ((unsigned long)(millis() - lastCamera) >= 5000) && sdcardPresent ) {
-//  lastCamera = millis();  // reset timer
-//  storeImage();  // save an image to sd card
-//  if (serialDebug) Serial.println("Time lapse image captured");
-//  }
 
  // flash status LED to show sketch is running ok
   if ((unsigned long)(millis() - lastStatus) >= TimeBetweenStatus) {
@@ -432,9 +336,9 @@ void loop() {
 }  // loop
 
 
-// ----------------------------------------------------------------
+// -------
 //  Initialise the camera
-// ----------------------------------------------------------------
+// -------
 // returns TRUE if successful
 // reset - if set to 1 all settings are reconfigured
 //  if set to zero you can change the settings and call this procedure to apply them
@@ -491,9 +395,9 @@ if (reset) {
 }
 
 
-// ----------------------------------------------------------------
+// -------
 //  -Change camera image settings
-// ----------------------------------------------------------------
+// -------
 // Adjust image properties (brightness etc.)
 // Defaults to auto adjustments if exposure and gain are both set to zero
 // - Returns TRUE if successful
@@ -564,9 +468,9 @@ bool cameraImageSettings() {
 //  s->set_wpc(s, 0);  // white pixel correction
 
 
-// ----------------------------------------------------------------
+// -------
 //  set up PWM for the illumination LED (flash)
-// ----------------------------------------------------------------
+// -------
 // note: I am not sure PWM is very reliable on the esp32cam - requires more testing
 void setupFlashPWM() {
   ledcSetup(ledChannel, ledFreq, ledRresolution);
@@ -582,22 +486,9 @@ void setupFlashPWM() {
  }
 
 
-// ----------------------------------------------------------------
-//  returns the current time as a String
-// ----------------------------------------------------------------
-//  see: https://randomnerdtutorials.com/esp32-date-time-ntp-client-server-arduino/
-String localTime() {
- struct tm timeinfo;
- char ttime[40];
- if(!getLocalTime(&timeinfo)) return"Failed to obtain time";
- strftime(ttime,40,  "%A %B %d %Y %H:%M:%S", &timeinfo);
- return ttime;
-}
-
-
-// ----------------------------------------------------------------
+// -------
 //  flash the indicator led 'reps' number of times
-// ----------------------------------------------------------------
+// -------
 void flashLED(int reps) {
  for(int x=0; x < reps; x++) {
   digitalWrite(indicatorLED,LOW);
@@ -608,9 +499,9 @@ void flashLED(int reps) {
 }
 
 
-// ----------------------------------------------------------------
+// -------
 //  send standard html header (i.e. start of web page)
-// ----------------------------------------------------------------
+// -------
 void sendHeader(WiFiClient &client, char* hTitle) {
   // Start page
   client.write("HTTP/1.1 200 OK\r\n");
@@ -652,9 +543,9 @@ void sendHeader(WiFiClient &client, char* hTitle) {
 }
 
 
-// ----------------------------------------------------------------
+// -------
 //  send a standard html footer (i.e. end of web page)
-// ----------------------------------------------------------------
+// -------
 void sendFooter(WiFiClient &client) {
   client.write("</body></html>\n");
   delay(3);
@@ -662,18 +553,18 @@ void sendFooter(WiFiClient &client) {
 }
 
 
-// ----------------------------------------------------------------
+// -------
 //  send line of text to both serial port and web page - used by readRGBImage
-// ----------------------------------------------------------------
+// -------
 void sendText(WiFiClient &client, String theText) {
   if (!sendRGBfile) client.print(theText + "<br>\n");
   if (serialDebug || theText.indexOf("error") > 0) Serial.println(theText);  // if text contains "error"
 }
 
 
-// ----------------------------------------------------------------
+// -------
 //  reset the camera
-// ----------------------------------------------------------------
+// -------
 // either hardware(1) or software(0)
 void resetCamera(bool type = 0) {
   if (type == 1) {
@@ -692,9 +583,9 @@ void resetCamera(bool type = 0) {
 }
 
 
-// ----------------------------------------------------------------
+// -------
 //  -change image resolution
-// ----------------------------------------------------------------
+// -------
 // cycles through the available resolutions (set in cyclingRes[])
 //Note: there seems to be an issue with 1024x768 with later releases of esp software?
 // Resolutions:  160x120 (QQVGA), 128x160 (QQVGA2), 176x144 (QCIF), 240x176 (HQVGA),
@@ -716,9 +607,9 @@ void changeResolution() {
 }
 
 
-// ----------------------------------------------------------------
+// -------
 //  Capture image from camera and save to spiffs or sd card
-// ----------------------------------------------------------------
+// -------
 // returns 0 if failed, 1 if stored in spiffs, 2 if stored on sd card
 
 byte storeImage() {
@@ -807,9 +698,9 @@ byte storeImage() {
 } // storeImage
 
 
-// ----------------------------------------------------------------
+// -------
 //  -Action any user input on root web page
-// ----------------------------------------------------------------
+// -------
 
 void rootUserInput(WiFiClient &client) {
 
@@ -896,14 +787,13 @@ void rootUserInput(WiFiClient &client) {
   }
 
 
-// ----------------------------------------------------------------
+// -------
 //  -root web page requested  i.e. http://x.x.x.x/
-// ----------------------------------------------------------------
+// -------
 // web page with control buttons, links etc.
 
 void handleRoot() {
 
- getNTPtime(2);  // refresh current time from NTP server
  WiFiClient client = server.client();  // open link with client
 
  rootUserInput(client);  // Action any user input from this web page
@@ -913,7 +803,7 @@ void handleRoot() {
   client.write("<FORM action='/' method='post'>\n");  // used by the buttons in the html (action = the web page to send it to
 
 
- // --------------------------------------------------------------------
+ // -----------
 
  // html main body
  //  Info on the arduino ethernet library:  https://www.arduino.cc/en/Reference/Ethernet
@@ -922,7 +812,7 @@ void handleRoot() {
  //  Verify your HTML is valid:  https://validator.w3.org/
 
 
-  // ---------------------------------------------------------------------------------------------
+  // -----------------
   //  info which is periodically updated using AJAX - https://www.w3schools.com/xml/ajax_intro.asp
 
   // empty lines which are populated via vbscript with live data from http://x.x.x.x/data in the form of comma separated text
@@ -956,7 +846,7 @@ void handleRoot() {
   )=====", dataRefresh * 1000);
 
 
-  // ---------------------------------------------------------------------------------------------
+  // -----------------
 
 
 //  // touch input on the two gpio pins
@@ -1022,7 +912,7 @@ void handleRoot() {
   client.println("<br><br><a href='https://github.com/alanesq/esp32cam-demo'>Sketch Info</a>");
 
 
- // --------------------------------------------------------------------
+ // -----------
 
 
  sendFooter(client);  // close web page
@@ -1030,9 +920,9 @@ void handleRoot() {
 }  // handleRoot
 
 
-// ----------------------------------------------------------------
+// -------
 //  -data web page requested  i.e. http://x.x.x.x/data
-// ----------------------------------------------------------------
+// -------
 // the root web page requests this periodically via Javascript in order to display updating information.
 // information in the form of comma seperated text is supplied which are then inserted in to blank lines on the web page
 // This makes it very easy to modify the data shown without having to change the javascript or root page html
@@ -1044,11 +934,13 @@ void handleData(){
   uint32_t SDusedSpace = 0;
   uint32_t SDtotalSpace = 0;
   uint32_t SDfreeSpace = 0;
+
   if (sdcardPresent) {
   SDusedSpace = SD_MMC.usedBytes() / (1024 * 1024);
   SDtotalSpace = SD_MMC.totalBytes() / (1024 * 1024);
   SDfreeSpace = SDtotalSpace - SDusedSpace;
   }
+
   String reply = "";
 
   // line1 - sd card
@@ -1063,10 +955,6 @@ void handleData(){
   reply += "Illumination led brightness=" + String(brightLEDbrightness);
   reply += " &ensp; Flash is ";  // Note: '&ensp;' leaves a gap
   reply += (flashRequired) ? "Enabled" : "Off";
-  reply += ",";
-
-  // line3 - Current real time
-  reply += "Current time: " + localTime();
   reply += ",";
 
   // line4 - gpio pin status
@@ -1087,9 +975,9 @@ void handleData(){
 }
 
 
-// ----------------------------------------------------------------
+// -------
 //  -photo save to sd card/spiffs  i.e. http://x.x.x.x/photo
-// ----------------------------------------------------------------
+// -------
 // web page to capture an image from camera and save to spiffs or sd card
 
 void handlePhoto() {
@@ -1123,9 +1011,9 @@ void handlePhoto() {
 
 
 
-// ----------------------------------------------------------------
+// -------
 // -display image stored on sd card or SPIFFS  i.e. http://x.x.x.x/img?img=x
-// ----------------------------------------------------------------
+// -------
 // Display a previously stored image, default image = most recent
 // returns 1 if image displayed ok
 
@@ -1203,9 +1091,9 @@ bool handleImg() {
 }  // handleImg
 
 
-// ----------------------------------------------------------------
+// -------
 //  -invalid web page requested
-// ----------------------------------------------------------------
+// -------
 // Note: shows a different way to send the HTML reply
 
 void handleNotFound() {
@@ -1233,9 +1121,9 @@ void handleNotFound() {
 }  // handleNotFound
 
 
-// ----------------------------------------------------------------
+// -------
 //  -access image data as RGB - i.e. http://x.x.x.x/rgb
-// ----------------------------------------------------------------
+// -------
 //Demonstration on how to access raw RGB data from the camera
 // Notes:
 //  Set sendRGBfile to 1 in the settings at top of sketch to just send the raw rgb data as a file which can then be used with
@@ -1383,42 +1271,9 @@ void readRGBImage() {
 
 }  // readRGBImage
 
-
-// ----------------------------------------------------------------
-//  -get time from ntp server
-// ----------------------------------------------------------------
-
-bool getNTPtime(int sec) {
-
-  uint32_t start = millis();  // timeout timer
-
-  do {
-  time(&now);
-  localtime_r(&now, &timeinfo);
-  if (serialDebug) Serial.print(".");
-  delay(100);
-  } while (((millis() - start) <= (1000 * sec)) && (timeinfo.tm_year < (2016 - 1900)));
-
-  if (timeinfo.tm_year <= (2016 - 1900)) return false;  // the NTP call was not successful
-  if (serialDebug) {
-  Serial.print("now ");
-  Serial.println(now);
-  }
-
-  // Display time
-  if (serialDebug)  {
-  char time_output[30];
-  strftime(time_output, 30, "%a  %d-%m-%y %T", localtime(&now));
-  Serial.println(time_output);
-  Serial.println();
-  }
- return true;
-}
-
-
-// ----------------------------------------------------------------
+// -------
 //  -capture jpg image and send  i.e. http://x.x.x.x/jpg
-// ----------------------------------------------------------------
+// -------
 
 bool handleJPG() {
 
@@ -1465,9 +1320,9 @@ bool handleJPG() {
 
 
 
-// ----------------------------------------------------------------
+// -------
 //  -stream requested  i.e. http://x.x.x.x/stream
-// ----------------------------------------------------------------
+// -------
 // Sends video stream - thanks to Uwe Gerlach for the code showing me how to do this
 
 void handleStream(){
@@ -1513,50 +1368,12 @@ void handleStream(){
  if (serialDebug) Serial.println("Video stream stopped");
  delay(3);
  client.stop();
-
-
 }  // handleStream
 
 
-// ----------------------------------------------------------------
-//  request a web page
-// ----------------------------------------------------------------
-//  @param  page  web page to request
-//  @param  received  String to store response in
-//  @param  maxWaitTime  maximum time to wait for reply (ms)
-//  @returns  http code
-// see:  https://randomnerdtutorials.com/esp32-http-get-post-arduino/#http-get-1
-// to do:  limit size of reply
-
-int requestWebPage(String* page, String* received, int maxWaitTime=5000){
-
-  if (serialDebug) Serial.println("requesting web page: " + *page);
-
-  WiFiClient client;
-  HTTPClient http;  // see:  https://github.com/esp8266/Arduino/blob/master/libraries/ESP8266HTTPClient
-  http.setTimeout(maxWaitTime);
-  http.begin(client, *page);  // for https requires (client, *page, thumbprint)  e.g.String thumbprint="08:3B:71:72:02:43:6E:CA:ED:42:86:93:BA:7E:DF:81:C4:BC:62:30";
-  int httpCode = http.GET();  // http codes: https://en.wikipedia.org/wiki/List_of_HTTP_status_codes
-  if (serialDebug) Serial.println("http code: " + String(httpCode));
-
-  if (httpCode > 0) {
-  *received = http.getString();
-  } else {
-  *received = "error:" + String(httpCode);
-  }
-  if (serialDebug) Serial.println(*received);
-
-  http.end();  //Close connection
-  if (serialDebug) Serial.println("Web connection closed");
-
-  return httpCode;
-
-}  // requestWebPage
-
-
-// ----------------------------------------------------------------
+// -------
 //  -show refreshing image  i.e. http://x.x.x.x/jpeg
-// ----------------------------------------------------------------
+// -------
 
 void handleJpeg() {
 
@@ -1595,9 +1412,9 @@ void handleJpeg() {
 }  // handleJpeg
 
 
-// ----------------------------------------------------------------
+// -------
 //  resize grayscale image
-// ----------------------------------------------------------------
+// -------
 // Thanks to Bard A.I. for writing this for me ;-)
 //  src_buf: The source image buffer.
 //  src_width: The width of the source image buffer.
@@ -1628,9 +1445,9 @@ void resize_esp32cam_image_buffer(uint8_t* src_buf, int src_width, int src_heigh
 }
 
 
-// ----------------------------------------------------------------
+// -------
 //  Capture grayscale image data
-// ----------------------------------------------------------------
+// -------
 
 void readGrayscaleImage() {
 
@@ -1713,9 +1530,9 @@ void readGrayscaleImage() {
   }
 
 
-// ----------------------------------------------------------------
+// -------
 //  -reboot web page requested  i.e. http://x.x.x.x/reboot
-// ----------------------------------------------------------------
+// -------
 // note: this can fail if the esp has just been reflashed and not restarted
 
 void handleReboot(){
@@ -1730,9 +1547,9 @@ void handleReboot(){
 }
 
 
-// ----------------------------------------------------------------
+// -------
 //  -test procedure  i.e. http://x.x.x.x/test
-// ----------------------------------------------------------------
+// -------
 
 void handleTest() {
 
@@ -1749,7 +1566,7 @@ void handleTest() {
  // html body
 
 
- // -------------------------------------------------------------------
+ // ----------
 
 
 
@@ -1819,7 +1636,7 @@ void handleTest() {
 */
 
 
- // -------------------------------------------------------------------
+ // ----------
 
  client.println("<br><br><a href='/'>Return</a>");  // link back
  sendFooter(client);  // close web page
