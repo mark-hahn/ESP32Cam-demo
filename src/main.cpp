@@ -17,9 +17,7 @@
   bool cameraImageSettings();  // this applies the image settings to the camera (brightness etc.)
   void changeResolution();  // this changes the capture frame size
   void flashLED(int);  // flashes the onboard indicator led
-  byte storeImage();  // stores an image in Spiffs or SD card
   void handleRoot();  // the root web page
-  void handlePhoto();  // web page to capture an image from camera and save to spiffs or sd card
   bool handleImg();  // Display a previously stored image 
   void handleNotFound();  // if invalid web page is requested
   void readRGBImage();  // demo capturing an image and reading its raw RGB data
@@ -203,7 +201,6 @@ void setup() {
   server.on("/data", handleData);  // suplies data to periodically update root (AJAX)
   server.on("/jpg", handleJPG);  // capture image and send as jpg
   server.on("/stream", handleStream);  // stream live video
-  server.on("/photo", handlePhoto);  // save image to sd card
   server.on("/img", handleImg);  // show image from sd card
   server.on("/rgb", readRGBImage);  // demo converting image to RGB
   server.on("/graydata", readGrayscaleImage);  // look at grayscale image data
@@ -605,96 +602,6 @@ void changeResolution() {
 }
 
 
-// -------
-//  Capture image from camera and save to spiffs or sd card
-// -------
-// returns 0 if failed, 1 if stored in spiffs, 2 if stored on sd card
-
-byte storeImage() {
-
- byte sRes = 0;  // result flag
- fs::FS &fs = SD_MMC;  // sd card file system
-
- // capture the image from camera
-  int currentBrightness = brightLEDbrightness;
-  if (flashRequired) {
-  brightLed(255);  // change LED brightness (0 - 255)
-  delay(100);
-  }
-  camera_fb_t * fb = NULL;
-  fb = esp_camera_fb_get();
-  // there is a bug where this buffer can be from previous capture so as workaround it is discarded and captured again
-  esp_camera_fb_return(fb); // dispose the buffered image
-  fb = NULL; // reset to capture errors
-  fb = esp_camera_fb_get(); // get fresh image  
-  if (flashRequired){
-  delay(100);
-  brightLed(currentBrightness);  // change LED brightness back to previous state
-  }
-  if (!fb) {
-  if (serialDebug) Serial.println("Error: Camera capture failed");
-  return 0;
-  }
-
- // save image to Spiffs
-  if (!sdcardPresent) {
-  if (serialDebug) Serial.println("Storing image to spiffs only");
-  SPIFFS.remove(spiffsFilename);  // if file name already exists delete it
-  File file = SPIFFS.open(spiffsFilename, FILE_WRITE);  // create new file
-  if (!file) {
-  if (serialDebug) Serial.println("Failed to create file in Spiffs - will format and try again");
-  if (!SPIFFS.format()) {  // format spiffs
-  if (serialDebug) Serial.println("Spiffs format failed");
-  } else {
-  file = SPIFFS.open(spiffsFilename, FILE_WRITE);  // try again to create new file
-  if (!file) {
-  if (serialDebug) Serial.println("Still unable to create file in spiffs");
-  }
-  }
-  }
-  if (file) {  // if file has been created ok write image data to it
-  if (file.write(fb->buf, fb->len)) {
-  sRes = 1;  // flag as saved ok
-  } else {
-  if (serialDebug) Serial.println("Error: failed to write image data to spiffs file");
-  }
-  }
-  esp_camera_fb_return(fb);  // return camera frame buffer
-  if (sRes == 1 && serialDebug) {
-  Serial.print("The picture has been saved to Spiffs as " + spiffsFilename);
-  Serial.print(" - Size: ");
-  Serial.print(file.size());
-  Serial.println(" bytes");
-  }
-  file.close();
-  }
-
-
- // save the image to sd card
-  if (sdcardPresent) {
-  if (serialDebug) Serial.printf("Storing image #%d to sd card \n", imageCounter);
-  String SDfilename = "/img/" + String(imageCounter + 1) + ".jpg";  // build the image file name
-  File file = fs.open(SDfilename, FILE_WRITE);  // create file on sd card
-  if (!file) {
-  if (serialDebug) Serial.println("Error: Failed to create file on sd-card: " + SDfilename);
-  } else {
-  if (file.write(fb->buf, fb->len)) {  // File created ok so save image to it
-  if (serialDebug) Serial.println("Image saved to sd card");
-  imageCounter ++;  // increment image counter
-  sRes = 2;  // flag as saved ok
-  } else {
-  if (serialDebug) Serial.println("Error: failed to save image data file on sd card");
-  }
-  file.close();  // close image file on sd card
-  }
-  }
-
- esp_camera_fb_return(fb);  // return frame so memory can be released
-
- return sRes;
-
-} // storeImage
-
 
 // -------
 //  -Action any user input on root web page
@@ -971,41 +878,6 @@ void handleData(){
 
   server.send(200, "text/plane", reply); //Send millis value only to client ajax request
 }
-
-
-// -------
-//  -photo save to sd card/spiffs  i.e. http://x.x.x.x/photo
-// -------
-// web page to capture an image from camera and save to spiffs or sd card
-
-void handlePhoto() {
-
- WiFiClient client = server.client();  // open link with client
-
- // log page request including clients IP
-  IPAddress cIP = client.remoteIP();
-  if (serialDebug) Serial.println("Save photo requested by " + cIP.toString());
-
- byte sRes = storeImage();  // capture and save an image to sd card or spiffs (store sucess or failed flag - 0=fail, 1=spiffs only, 2=spiffs and sd card)
-
- // html header
-  sendHeader(client, "Capture and save image");
-
- // html body
-  if (sRes == 2) {
-  client.printf("<p>Image saved to sd card as image number %d </p>\n", imageCounter);
-  } else if (sRes == 1) {
-  client.write("<p>Image saved in Spiffs</p>\n");
-  } else {
-  client.write("<p>Error: Failed to save image</p>\n");
-  }
-
-  client.write("<a href='/'>Return</a>\n");  // link back
-
- // close web page
-  sendFooter(client);
-
-}  // handlePhoto
 
 
 
