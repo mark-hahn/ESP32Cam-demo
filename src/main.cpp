@@ -17,7 +17,6 @@
   bool cameraImageSettings();  // this applies the image settings to the camera (brightness etc.)
   void changeResolution();  // this changes the capture frame size
   void flashLED(int);  // flashes the onboard indicator led
-  bool handleImg();  // Display a previously stored image 
   void handleNotFound();  // if invalid web page is requested
   void readRGBImage();  // demo capturing an image and reading its raw RGB data
   bool handleJPG();  // display a raw jpg image
@@ -199,7 +198,6 @@ void setup() {
   server.on("/data", handleData);  // suplies data to periodically update root (AJAX)
   server.on("/jpg", handleJPG);  // capture image and send as jpg
   server.on("/stream", handleStream);  // stream live video
-  server.on("/img", handleImg);  // show image from sd card
   server.on("/rgb", readRGBImage);  // demo converting image to RGB
   server.on("/graydata", readGrayscaleImage);  // look at grayscale image data
   server.on("/test", handleTest);  // Testing procedure
@@ -653,85 +651,6 @@ void handleData(){
 }
 
 
-
-// -------
-// -display image stored on sd card or SPIFFS  i.e. http://x.x.x.x/img?img=x
-// -------
-// Display a previously stored image, default image = most recent
-// returns 1 if image displayed ok
-
-bool handleImg() {
-
-  WiFiClient client = server.client();  // open link with client
-  bool pRes = 0;
-
-  // log page request including clients IP
-  IPAddress cIP = client.remoteIP();
-  if (serialDebug) Serial.println("Display stored image requested by " + cIP.toString());
-
-  int imgToShow = imageCounter;  // default to showing most recent file
-
-  // get image number from url parameter
-  if (server.hasArg("img") && sdcardPresent) {
-  String Tvalue = server.arg("img");  // read value
-  imgToShow = Tvalue.toInt();  // convert string to int
-  if (imgToShow < 1 || imgToShow > imageCounter) imgToShow = imageCounter;  // validate image number
-  }
-
-  // if stored on sd card
-  if (sdcardPresent) {
-  if (serialDebug) Serial.printf("Displaying image #%d from sd card", imgToShow);
-
-  String tFileName = "/img/" + String(imgToShow) + ".jpg";
-  fs::FS &fs = SD_MMC;  // sd card file system
-  File timg = fs.open(tFileName, "r");
-  if (timg) {
-  size_t sent = server.streamFile(timg, "image/jpeg");  // send the image
-  timg.close();
-  pRes = 1;  // flag sucess
-  } else {
-  if (serialDebug) Serial.println("Error: image file not found");
-  sendHeader(client, "Display stored image");
-  client.write("<p>Error: Image not found</p></html>\n");
-  client.write("<br><a href='/'>Return</a>\n");  // link back
-  sendFooter(client);  // close web page
-  }
-  }
-
-  // if stored in SPIFFS
-  if (!sdcardPresent) {
-  if (serialDebug) Serial.println("Displaying image from spiffs");
-
-  // check file exists
-  if (!SPIFFS.exists(spiffsFilename)) {
-  sendHeader(client, "Display stored image");
-  client.write("Error: No image found to display\n");
-  client.write("<br><a href='/'>Return</a>\n");  // link back
-  sendFooter(client);  // close web page
-  return 0;
-  }
-
-  File f = SPIFFS.open(spiffsFilename, "r");  // read file from spiffs
-  if (!f) {
-  if (serialDebug) Serial.println("Error reading " + spiffsFilename);
-  sendHeader(client, "Display stored image");
-  client.write("Error reading file from Spiffs\n");
-  client.write("<br><a href='/'>Return</a>\n");  // link back
-  sendFooter(client);  // close web page
-  }
-  else {
-  size_t sent = server.streamFile(f, "image/jpeg");  // send file to web page
-  if (!sent) {
-  if (serialDebug) Serial.println("Error sending " + spiffsFilename);
-  } else {
-  pRes = 1;  // flag sucess
-  }
-  f.close();
-  }
-  }
-  return pRes;
-
-}  // handleImg
 
 
 // -------
