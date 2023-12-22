@@ -81,35 +81,14 @@ framesize_t FRAME_SIZE_IMAGE = cyclingRes[0];
 #include <HTTPClient.h>
 #include "driver/ledc.h"  // used to configure pwm on illumination led
 
-// spiffs used to store images if no sd card present
- #include <SPIFFS.h>
- #include <FS.h>  // gives file access on spiffs
-
 WebServer server(80);  // serve web pages on port 80
 
 // Used to disable brownout detection
  #include "soc/soc.h"
  #include "soc/rtc_cntl_reg.h"
 
-// sd-card
- #include "SD_MMC.h"  // sd card - see https://randomnerdtutorials.com/esp32-cam-take-photo-save-microsd-card/
- #include <SPI.h>
- #include <FS.h>  // gives file access
- #define SD_CS 5  // sd chip select pin = 5
-
-// MCP23017 IO expander on pins 12 and 13 (optional)
- #if useMCP23017 == 1
-  #include <Wire.h>
-  #include "Adafruit_MCP23017.h"
-  Adafruit_MCP23017 mcp;
-  // Wire.setClock(1700000); // set frequency to 1.7mhz
- #endif
-
 // Define some global variables:
  uint32_t lastStatus = millis();  // last time status light changed status (to flash all ok led)
- bool sdcardPresent;  // flag if an sd card is detected
- int imageCounter;  // image file name on sd card counter
- String spiffsFilename = "/image.jpg";  // image name to use when storing in spiffs
  String ImageResDetails = "Unknown";  // image resolution info
 
 enum rst_reason {
@@ -183,59 +162,6 @@ void setup() {
   Serial.println("failed");
   }
 
- // Spiffs - for storing images without an sd card
- //  see: https://circuits4you.com/2018/01/31/example-of-esp8266-flash-file-system-spiffs/
-  if (!SPIFFS.begin(true)) {
-  Serial.println(("An Error has occurred while mounting SPIFFS - restarting"));
-  delay(5000);
-  ESP.restart();  // restart and try again
-  delay(5000);
-  } else {
-  // SPIFFS.format();  // wipe spiffs
-  delay(5000);
-  Serial.print(("SPIFFS mounted successfully: "));
-  Serial.printf("total bytes: %d , used: %d \n", SPIFFS.totalBytes(), SPIFFS.usedBytes());
-  }
-
- // SD Card - if one is detected set 'sdcardPresent' High
-  if (!SD_MMC.begin("/sdcard", true)) {  // if loading sd card fails
-  // note: ('/sdcard", true)' = 1bit mode - see: https://www.reddit.com/r/esp32/comments/d71es9/a_breakdown_of_my_experience_trying_to_talk_to_an/
-  Serial.println("No SD Card detected");
-  sdcardPresent = 0;  // flag no sd card available
-  } else {
-  uint8_t cardType = SD_MMC.cardType();
-  if (cardType == CARD_NONE) {  // if invalid card found
-  Serial.println("SD Card type detect failed");
-  sdcardPresent = 0;  // flag no sd card available
-  } else {
-  // valid sd card detected
-  uint16_t SDfreeSpace = (uint64_t)(SD_MMC.totalBytes() - SD_MMC.usedBytes()) / (1024 * 1024);
-  Serial.printf("SD Card found, free space = %dmB \n", SDfreeSpace);
-  sdcardPresent = 1;  // flag sd card available
-  }
-  }
-  fs::FS &fs = SD_MMC;  // sd card file system
-
- // discover the number of image files already stored in '/img' folder of the sd card and set image file counter accordingly
-  imageCounter = 0;
-  if (sdcardPresent) {
-  int tq=fs.mkdir("/img");  // create the '/img' folder on sd card (in case it is not already there)
-  if (!tq) {
-  Serial.println("Unable to create IMG folder on sd card");
-  }
-
-  // open the image folder and step through all files in it
-  File root = fs.open("/img");
-  while (true)
-  {
-  File entry =  root.openNextFile();  // open next file in the folder
-  if (!entry) break;  // if no more files in the folder
-  imageCounter ++;  // increment image counter
-  entry.close();
-  }
-  root.close();
-  Serial.printf("Image file count = %d \n",imageCounter);
-  }
 
 // watchdog timer (esp32)
   Serial.println("Configuring watchdog timer");
