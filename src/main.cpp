@@ -24,7 +24,6 @@
   void handleNotFound();  // if invalid web page is requested
   void readRGBImage();  // demo capturing an image and reading its raw RGB data
   bool handleJPG();  // display a raw jpg image
-  void handleJpeg();  // display a raw jpg image which periodically refreshes
   void handleStream();  // stream live video (note: this can get the camera very hot)
   void handleTest();  // test procedure for experimenting with bits of code etc.
   void brightLed(byte);  // turn the onboard flash LED on/off with varying brightness
@@ -203,7 +202,6 @@ void setup() {
   server.on("/", handleRoot);  // root page
   server.on("/data", handleData);  // suplies data to periodically update root (AJAX)
   server.on("/jpg", handleJPG);  // capture image and send as jpg
-  server.on("/jpeg", handleJpeg);  // show updating image
   server.on("/stream", handleStream);  // stream live video
   server.on("/photo", handlePhoto);  // save image to sd card
   server.on("/img", handleImg);  // show image from sd card
@@ -1369,48 +1367,6 @@ void handleStream(){
  delay(3);
  client.stop();
 }  // handleStream
-
-
-// -------
-//  -show refreshing image  i.e. http://x.x.x.x/jpeg
-// -------
-
-void handleJpeg() {
-
-  const int refreshRate = 2000;  // image refresh rate (ms)
-
-  WiFiClient client = server.client();  // open link with client
-
-  // Start page
-  client.write("HTTP/1.1 200 OK\r\n");
-  client.write("Content-Type: text/html\r\n");
-  client.write("Connection: close\r\n");
-  client.write("\r\n");
-  client.write("<!DOCTYPE HTML><html lang='en'>\n");
-  client.write("<head></head><body>");
-
-  client.write("<FORM action='/' method='post'>\n");  // used by the buttons in the html (action = the web page to send it to
-
-  // capture and show a jpg image
-  client.write("<img id='image1' src='/jpg'/>");  // show image from http://x.x.x.x/jpg
-
-  // javascript to refresh the image periodically
-  client.printf(R"=====(
-  <script>
-  function refreshImage(){
-  var timestamp = new Date().getTime();
-  var el = document.getElementById('image1');
-  var queryString = '?t=' + timestamp;
-  el.src = '/jpg' + queryString;
-  }
-  setInterval(function() { refreshImage(); }, %d);
-  </script>
-  )=====", refreshRate);  
-
-
-  sendFooter(client);  // close web page
-}  // handleJpeg
-
 
 // -------
 //  resize grayscale image
