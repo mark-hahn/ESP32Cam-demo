@@ -17,7 +17,6 @@
   bool cameraImageSettings();  // this applies the image settings to the camera (brightness etc.)
   void changeResolution();  // this changes the capture frame size
   void flashLED(int);  // flashes the onboard indicator led
-  void handleRoot();  // the root web page
   bool handleImg();  // Display a previously stored image 
   void handleNotFound();  // if invalid web page is requested
   void readRGBImage();  // demo capturing an image and reading its raw RGB data
@@ -197,7 +196,6 @@ void setup() {
   digitalWrite(indicatorLED,HIGH);  // small indicator led off
 
  // define the web pages (i.e. call these procedures when url is requested)
-  server.on("/", handleRoot);  // root page
   server.on("/data", handleData);  // suplies data to periodically update root (AJAX)
   server.on("/jpg", handleJPG);  // capture image and send as jpg
   server.on("/stream", handleStream);  // stream live video
@@ -601,237 +599,12 @@ void changeResolution() {
   ImageResDetails = "Unknown";  // set next time image captured
 }
 
-
-
-// -------
-//  -Action any user input on root web page
-// -------
-
-void rootUserInput(WiFiClient &client) {
-
-  // if button1 was pressed (toggle io pin A)
-  //  Note:  if using an input box etc. you would read the value with the command:  String Bvalue = server.arg("demobutton1");
-
-  // if button1 was pressed (toggle io pin B)
-  if (server.hasArg("button1")) {
-  if (serialDebug) Serial.println("Button 1 pressed");
-  digitalWrite(iopinB,!digitalRead(iopinB));  // toggle output pin on/off
-  }
-
-  // if button2 was pressed (Cycle illumination LED)
-  if (server.hasArg("button2")) {
-  if (serialDebug) Serial.println("Button 2 pressed");
-  if (brightLEDbrightness == 0) brightLed(10);  // turn led on dim
-  else if (brightLEDbrightness == 10) brightLed(40);  // turn led on medium
-  else if (brightLEDbrightness == 40) brightLed(255);  // turn led on full
-  else brightLed(0);  // turn led off
-  }
-
-  // if button3 was pressed (toggle flash)
-  if (server.hasArg("button3")) {
-  if (serialDebug) Serial.println("Button 3 pressed");
-  flashRequired = !flashRequired;
-  }
-
-  // if button3 was pressed (format SPIFFS)
-  if (server.hasArg("button4")) {
-  if (serialDebug) Serial.println("Button 4 pressed");
-  if (!SPIFFS.format()) {
-  if (serialDebug) Serial.println("Error: Unable to format Spiffs");
-  } else {
-  if (serialDebug) Serial.println("Spiffs memory has been formatted");
-  }
-  }
-
-  // if button4 was pressed (change resolution)
-  if (server.hasArg("button5")) {
-  if (serialDebug) Serial.println("Button 5 pressed");
-  changeResolution();  // cycle through some options
-  }
-
-  // if brightness was adjusted - cameraImageBrightness
-  if (server.hasArg("bright")) {
-  String Tvalue = server.arg("bright");  // read value
-  if (Tvalue != NULL) {
-  int val = Tvalue.toInt();
-  if (val >= -2 && val <= 2 && val != cameraImageBrightness) {
-  if (serialDebug) Serial.printf("Brightness changed to %d\n", val);
-  cameraImageBrightness = val;
-  cameraImageSettings();  // Apply camera image settings
-  }
-  }
-  }
-
-  // if exposure was adjusted - cameraImageExposure
-  if (server.hasArg("exp")) {
-  if (serialDebug) Serial.println("Exposure has been changed");
-  String Tvalue = server.arg("exp");  // read value
-  if (Tvalue != NULL) {
-  int val = Tvalue.toInt();
-  if (val >= 0 && val <= 1200 && val != cameraImageExposure) {
-  if (serialDebug) Serial.printf("Exposure changed to %d\n", val);
-  cameraImageExposure = val;
-  cameraImageSettings();  // Apply camera image settings
-  }
-  }
-  }
-
-  // if image gain was adjusted - cameraImageGain
-  if (server.hasArg("gain")) {
-  if (serialDebug) Serial.println("Gain has been changed");
-  String Tvalue = server.arg("gain");  // read value
-  if (Tvalue != NULL) {
-  int val = Tvalue.toInt();
-  if (val >= 0 && val <= 31 && val != cameraImageGain) {
-  if (serialDebug) Serial.printf("Gain changed to %d\n", val);
-  cameraImageGain = val;
-  cameraImageSettings();  // Apply camera image settings
-  }
-  }
-  }
-  }
-
-
-// -------
-//  -root web page requested  i.e. http://x.x.x.x/
-// -------
-// web page with control buttons, links etc.
-
-void handleRoot() {
-
- WiFiClient client = server.client();  // open link with client
-
- rootUserInput(client);  // Action any user input from this web page
-
- // html header
-  sendHeader(client, stitle);
-  client.write("<FORM action='/' method='post'>\n");  // used by the buttons in the html (action = the web page to send it to
-
-
- // -----------
-
- // html main body
- //  Info on the arduino ethernet library:  https://www.arduino.cc/en/Reference/Ethernet
- //  Info in HTML:  https://www.w3schools.com/html/
- //  Info on Javascript (can be inserted in to the HTML):  https://www.w3schools.com/js/default.asp
- //  Verify your HTML is valid:  https://validator.w3.org/
-
-
-  // -----------------
-  //  info which is periodically updated using AJAX - https://www.w3schools.com/xml/ajax_intro.asp
-
-  // empty lines which are populated via vbscript with live data from http://x.x.x.x/data in the form of comma separated text
-  int noLines = 6;  // number of text lines to be populated by javascript
-  for (int i = 0; i < noLines; i++) {
-  client.println("<span id='uline" + String(i) + "'></span><br>");
-  }
-
-  // Javascript - to periodically update the above info lines from http://x.x.x.x/data
-  // Note: You can compact the javascript to save flash memory via https://www.textfixer.com/html/compress-html-compression.php
-  //  The below = client.printf(R"=====(  <script> function getData() { var xhttp = new XMLHttpRequest(); xhttp.onreadystatechange = function() { if (this.readyState == 4 && this.status == 200) { var receivedArr = this.responseText.split(','); for (let i = 0; i < receivedArr.length; i++) { document.getElementById('uline' + i).innerHTML = receivedArr[i]; } } }; xhttp.open('GET', 'data', true); xhttp.send();} getData(); setInterval(function() { getData(); }, %d); </script> )=====", dataRefresh * 1000);
-
-  // get a comma seperated list from http://x.x.x.x/data and populate the blank lines in html above
-  client.printf(R"=====(
-  <script>
-  function getData() {
-  var xhttp = new XMLHttpRequest();
-  xhttp.onreadystatechange = function() {
-  if (this.readyState == 4 && this.status == 200) {
-  var receivedArr = this.responseText.split(',');
-  for (let i = 0; i < receivedArr.length; i++) {
-  document.getElementById('uline' + i).innerHTML = receivedArr[i];
-  }
-  }
-  };
-  xhttp.open('GET', 'data', true);
-  xhttp.send();}
-  getData();
-  setInterval(function() { getData(); }, %d);
-  </script>
-  )=====", dataRefresh * 1000);
-
-
-  // -----------------
-
-
-//  // touch input on the two gpio pins
-//  client.printf("<p>Touch on pin 12: %d </p>\n", touchRead(T5) );
-//  client.printf("<p>Touch on pin 13: %d </p>\n", touchRead(T4) );
-
-  // OTA
-  if (OTAEnabled) client.write("<br>OTA IS ENABLED!"); 
-
-  // Control buttons
-  client.write("<br><br>");
-  client.write("<input style='height: 35px;' name='button1' value='Toggle pin 12' type='submit'> \n");
-  client.write("<input style='height: 35px;' name='button2' value='Cycle illumination LED' type='submit'> \n");
-  client.write("<input style='height: 35px;' name='button3' value='Toggle Flash' type='submit'> \n");
-  client.write("<input style='height: 35px;' name='button4' value='Wipe SPIFFS memory' type='submit'> \n");
-  client.write("<input style='height: 35px;' name='button5' value='Change Resolution' type='submit'><br> \n");
-
-  // Image setting controls
-  client.println("<br>CAMERA SETTINGS: ");
-  client.printf("Brightness: <input type='number' style='width: 50px' name='bright' title='from -2 to +2' min='-2' max='2' value='%d'>  \n", cameraImageBrightness);
-  client.printf("Exposure: <input type='number' style='width: 50px' name='exp' title='from 0 to 1200' min='0' max='1200' value='%d'>  \n", cameraImageExposure);
-  client.printf("Gain: <input type='number' style='width: 50px' name='gain' title='from 0 to 30' min='0' max='30' value='%d'>\n", cameraImageGain);
-  client.println(" <input type='submit' name='submit' value='Submit change / Refresh Image'>");
-  client.println("<br>Set exposure and gain to zero for auto adjust");
-
-  // links to the other pages available
-  client.write("<br><br>LINKS: \n");
-  client.write("<a href='/photo'>Store image</a> - \n");
-  client.write("<a href='/img'>View stored image</a> - \n");
-  client.write("<a href='/rgb'>RGB frame as data</a> - \n");
-  client.write("<a href='/graydata'>Grayscale frame as data</a> \n");
-  client.write("<br>");
-  client.write("<a href='/stream'>Live stream</a> - \n");
-  client.write("<a href='/jpg'>JPG</a> - \n");
-  client.write("<a href='/jpeg'>Updating JPG</a> - \n");
-  client.write("<a href='/test'>Test procedure</a>\n");
-  #if ENABLE_OTA
-  client.write(" - <a href='/ota'>Update via OTA</a>\n");
-  #endif
-
-  // addnl info if sd card present
-  if (sdcardPresent) {
-  client.write("<br>Note: You can view the individual stored images on sd card with:  http://x.x.x.x/img?img=1");
-  }
-
-  // capture and show a jpg image
-  client.write("<br><br><a href='/jpg'>");  // make it a link
-  client.write("<img id='image1' src='/jpg' width='320' height='240' /> </a>");  // show image from http://x.x.x.x/jpg
-
-  // javascript to refresh the image periodically
-  client.printf(R"=====(
-  <script>
-  function refreshImage(){
-  var timestamp = new Date().getTime();
-  var el = document.getElementById('image1');
-  var queryString = '?t=' + timestamp;
-  el.src = '/jpg' + queryString;
-  }
-  setInterval(function() { refreshImage(); }, %d);
-  </script>
-  )=====", imagerefresh * 1013);  // 1013 is just to stop it refreshing at the same time as /data
-
-  client.println("<br><br><a href='https://github.com/alanesq/esp32cam-demo'>Sketch Info</a>");
-
-
- // -----------
-
-
- sendFooter(client);  // close web page
-
-}  // handleRoot
-
-
 // -------
 //  -data web page requested  i.e. http://x.x.x.x/data
 // -------
 // the root web page requests this periodically via Javascript in order to display updating information.
 // information in the form of comma seperated text is supplied which are then inserted in to blank lines on the web page
 // This makes it very easy to modify the data shown without having to change the javascript or root page html
-// Note: to change the number of lines displayed update variable 'noLines' in handleroot()
 
 void handleData(){
 
