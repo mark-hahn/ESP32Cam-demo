@@ -2,44 +2,31 @@
 
 #include <Arduino.h>
 #include "esp_camera.h" 
-// watchdog timer  - see: https://iotassistant.io/esp32/enable-hardware-watchdog-timer-esp32-arduino-ide/
 #include <esp_task_wdt.h>  
+#include "esp32/rom/rtc.h"
 
 #define SSID_NAME "hahn-fi"
 #define SSID_PASWORD "90-NBVcvbasd"
-  
-//  ----------
 
-  // Required by PlatformIO
+#define serialSpeed 921600
 
-  // forward declarations
-  bool initialiseCamera(bool);  // this sets up and enables the camera (if bool=1 standard settings are applied but 0 allows you to apply custom settings)
-  bool cameraImageSettings();  // this applies the image settings to the camera (brightness etc.)
-  void changeResolution();  // this changes the capture frame size
-  void flashLED(int);  // flashes the onboard indicator led
-  void handleNotFound();  // if invalid web page is requested
-  bool handleJPG();  // display a raw jpg image
-  void brightLed(byte);  // turn the onboard flash LED on/off with varying brightness
-  void setupFlashPWM();  // set up the PWM for the above flash
-  void resize_esp32cam_image_buffer(uint8_t*, int, int, uint8_t*, int, int);  // this resizes a captured grayscale image (used by above)
+bool initialiseCamera(bool);  // this sets up and enables the camera (if bool=1 standard settings are applied but 0 allows you to apply custom settings)
+bool cameraImageSettings();  // this applies the image settings to the camera (brightness etc.)
+void changeResolution();  // this changes the capture frame size
+void handleNotFound();  // if invalid web page is requested
+bool handleJPG();  // display a raw jpg image
 
 
 // ------
 //  -SETTINGS
 // ------
 
- char* stitle = "ESP32Cam-demo";  // title of this sketch
- char* sversion = "02Nov23";  // Sketch version
-
- #define WDT_TIMEOUT 60  // timeout of watchdog timer (seconds) 
+ #define WDT_TIMEOUT 10  // timeout of watchdog timer (seconds) 
 
  const bool sendRGBfile = 0;  // if set to 1 '/rgb' will just return raw rgb data which can then be saved as a file rather than display a HTML pag
 
  uint16_t dataRefresh = 2;  // how often to refresh data on root web page (seconds)
  uint16_t imagerefresh = 2;  // how often to refresh the image on root web page (seconds)
-
- const bool serialDebug = 1;  // show debug info. on serial port (1=enabled, disable if using pins 1 and 3 as gpio)
- const int serialSpeed = 921600;  // Serial data speed to use
 
  #define useMCP23017 0  // set if MCP23017 IO expander chip is being used (on pins 12 and 13)
 
@@ -57,19 +44,6 @@
   const int camChangeDelay = 200;  // delay when deinit camera executed
 
  const int TimeBetweenStatus = 600;  // speed of flashing system running ok status light (milliseconds)
-
- const int indicatorLED = 33;  // onboard small LED pin (33)
-
- // Bright LED (Flash)
-  const int brightLED = 4;  // onboard Illumination/flash LED pin (4)
-  int brightLEDbrightness = 0;  // initial brightness (0 - 255)
-  const int ledFreq = 5000;  // PWM settings
-  const int ledChannel = 15;  // camera uses timer1
-  const int ledRresolution = 8;  // resolution (8 = from 0 to 255)
-
- const int iopinA = 13;  // general io pin 13
- const int iopinB = 12;  // general io pin 12 (must not be high at boot)
-
 
 // camera settings (for the standard - OV2640 - CAMERA_MODEL_AI_THINKER)
 // see: https://randomnerdtutorials.com/esp32-cam-camera-pin-gpios/
@@ -138,103 +112,105 @@ WebServer server(80);  // serve web pages on port 80
  String spiffsFilename = "/image.jpg";  // image name to use when storing in spiffs
  String ImageResDetails = "Unknown";  // image resolution info
 
-// OTA Stuff
-  bool OTAEnabled = 0;  // flag to show if OTA has been enabled (via supply of password in http://x.x.x.x/ota)
-  #if ENABLE_OTA
-  void sendHeader(WiFiClient &client, char* hTitle);  // forward declarations
-  void sendFooter(WiFiClient &client);
-  #include "ota.h"  // Over The Air updates (OTA)
-  #endif
+enum rst_reason {
+    REASON_DEFAULT_RST      = 0,    /* normal startup by power on */
+    REASON_WDT_RST          = 1,    /* hardware watch dog reset */
+    REASON_EXCEPTION_RST    = 2,    /* exception reset, GPIO status won’t change */
+    REASON_SOFT_WDT_RST     = 3,    /* software watch dog reset, GPIO status won’t change */
+    REASON_SOFT_RESTART     = 4,    /* software restart ,system_restart , GPIO status won’t change */
+    REASON_DEEP_SLEEP_AWAKE = 5,    /* wake up from deep-sleep */
+    REASON_EXT_SYS_RST      = 6     /* external system reset */
+};
 
-// ------
-//  -SETUP  SETUP  SETUP  SETUP  SETUP  SETUP
-// ------
+void verbose_print_reset_reason(int reason) {
+  if(reason < 2) return;
+  switch ( reason) {
+    case 1  : Serial.println ("Vbat power on reset");break;
+    case 3  : Serial.println ("Software reset digital core");break;
+    case 4  : Serial.println ("Legacy watch dog reset digital core");break;
+    case 5  : Serial.println ("Deep Sleep reset digital core");break;
+    case 6  : Serial.println ("Reset by SLC module, reset digital core");break;
+    case 7  : Serial.println ("Timer Group0 Watch dog reset digital core");break;
+    case 8  : Serial.println ("Timer Group1 Watch dog reset digital core");break;
+    case 9  : Serial.println ("RTC Watch dog Reset digital core");break;
+    case 10 : Serial.println ("Instrusion tested to reset CPU");break;
+    case 11 : Serial.println ("Time Group reset CPU");break;
+    case 12 : Serial.println ("Software reset CPU");break;
+    case 13 : Serial.println ("RTC Watch dog Reset CPU");break;
+    case 14 : Serial.println ("for APP CPU, reseted by PRO CPU");break;
+    case 15 : Serial.println ("Reset when the vdd voltage is not stable");break;
+    case 16 : Serial.println ("RTC Watch dog reset digital core and rtc module");break;
+    default : Serial.println ("NO_MEAN");
+  }
+}
 
 void setup() {
 
- if (serialDebug) {
-  Serial.begin(serialSpeed);  // Start serial communication
-  // Serial.setDebugOutput(true);
+  Serial.begin(serialSpeed); 
+  Serial.println();
+  Serial.printf("Starting");
 
-  Serial.println("\n\n\n");  // line feeds
-  Serial.println("----------------");
-  Serial.printf("Starting - %s - %s \n", stitle, sversion);
-  Serial.println("----------------");
-  // Serial.print("Reset reason: " + ESP.getResetReason());
- }
+  verbose_print_reset_reason(rtc_get_reset_reason(0));
+  verbose_print_reset_reason(rtc_get_reset_reason(1));
 
- WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);  // Turn-off the 'brownout detector'
-
- // small indicator led on rear of esp32cam board
-  pinMode(indicatorLED, OUTPUT);
-  digitalWrite(indicatorLED,HIGH);
+//  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);  // Turn-off the 'brownout detector'
 
  // Connect to wifi
-  digitalWrite(indicatorLED,LOW);  // small indicator led on
-  if (serialDebug) {
   Serial.print("\nConnecting to ");
   Serial.print(SSID_NAME);
   Serial.print("\n  ");
-  }
+
   WiFi.begin(SSID_NAME, SSID_PASWORD);
   while (WiFi.status() != WL_CONNECTED) {
   delay(500);
-  if (serialDebug) Serial.print(".");
+  Serial.print(".");
   }
-  if (serialDebug) {
   Serial.print("\nWiFi connected, ");
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
-  }
-  server.begin();  // start web server
-  digitalWrite(indicatorLED,HIGH);  // small indicator led off
 
- // define the web pages (i.e. call these procedures when url is requested)
+  server.begin();
+
   server.on("/jpg", handleJPG);  // capture image and send as jpg
   server.onNotFound(handleNotFound);  // invalid url requested
-#if ENABLE_OTA  
-  server.on("/ota", handleOTA);  // ota updates web page
-#endif  
 
  // set up camera
-  if (serialDebug) Serial.print(("\nInitialising camera: "));
+  Serial.print(("\nInitialising camera: "));
   if (initialiseCamera(1)) {  // apply settings from 'config' and start camera
-  if (serialDebug) Serial.println("OK");
+  Serial.println("OK");
   }
   else {
-  if (serialDebug) Serial.println("failed");
+  Serial.println("failed");
   }
 
  // Spiffs - for storing images without an sd card
  //  see: https://circuits4you.com/2018/01/31/example-of-esp8266-flash-file-system-spiffs/
   if (!SPIFFS.begin(true)) {
-  if (serialDebug) Serial.println(("An Error has occurred while mounting SPIFFS - restarting"));
+  Serial.println(("An Error has occurred while mounting SPIFFS - restarting"));
   delay(5000);
   ESP.restart();  // restart and try again
   delay(5000);
   } else {
   // SPIFFS.format();  // wipe spiffs
   delay(5000);
-  if (serialDebug) {
   Serial.print(("SPIFFS mounted successfully: "));
   Serial.printf("total bytes: %d , used: %d \n", SPIFFS.totalBytes(), SPIFFS.usedBytes());
-  }
   }
 
  // SD Card - if one is detected set 'sdcardPresent' High
   if (!SD_MMC.begin("/sdcard", true)) {  // if loading sd card fails
   // note: ('/sdcard", true)' = 1bit mode - see: https://www.reddit.com/r/esp32/comments/d71es9/a_breakdown_of_my_experience_trying_to_talk_to_an/
-  if (serialDebug) Serial.println("No SD Card detected");
+  Serial.println("No SD Card detected");
   sdcardPresent = 0;  // flag no sd card available
   } else {
   uint8_t cardType = SD_MMC.cardType();
   if (cardType == CARD_NONE) {  // if invalid card found
-  if (serialDebug) Serial.println("SD Card type detect failed");
+  Serial.println("SD Card type detect failed");
   sdcardPresent = 0;  // flag no sd card available
   } else {
   // valid sd card detected
   uint16_t SDfreeSpace = (uint64_t)(SD_MMC.totalBytes() - SD_MMC.usedBytes()) / (1024 * 1024);
-  if (serialDebug) Serial.printf("SD Card found, free space = %dmB \n", SDfreeSpace);
+  Serial.printf("SD Card found, free space = %dmB \n", SDfreeSpace);
   sdcardPresent = 1;  // flag sd card available
   }
   }
@@ -245,7 +221,7 @@ void setup() {
   if (sdcardPresent) {
   int tq=fs.mkdir("/img");  // create the '/img' folder on sd card (in case it is not already there)
   if (!tq) {
-  if (serialDebug) Serial.println("Unable to create IMG folder on sd card");
+  Serial.println("Unable to create IMG folder on sd card");
   }
 
   // open the image folder and step through all files in it
@@ -258,40 +234,17 @@ void setup() {
   entry.close();
   }
   root.close();
-  if (serialDebug) Serial.printf("Image file count = %d \n",imageCounter);
+  Serial.printf("Image file count = %d \n",imageCounter);
   }
 
- // define i/o pins
-  pinMode(indicatorLED, OUTPUT);  // defined again as sd card config can reset it
-  digitalWrite(indicatorLED,HIGH);  // led off = High
-  pinMode(iopinA, INPUT);  // pin 13 - free io pin, can be used for input or output
-  pinMode(iopinB, OUTPUT);  // pin 12 - free io pin, can be used for input or output (must not be high at boot)
-
- // MCP23017 io expander (requires adafruit MCP23017 library)
- #if useMCP23017 == 1
-  Wire.begin(12,13);  // use pins 12 and 13 for i2c
-  mcp.begin(&Wire);  // use default address 0
-  mcp.pinMode(0, OUTPUT);  // Define GPA0 (physical pin 21) as output pin
-  mcp.pinMode(8, INPUT);  // Define GPB0 (physical pin 1) as input pin
-  mcp.pullUp(8, HIGH);  // turn on a 100K pullup internally
-  // change pin state with  mcp.digitalWrite(0, HIGH);
-  // read pin state with  mcp.digitalRead(8)
- #endif
-
-setupFlashPWM();  // configure PWM for the illumination LED
-
 // watchdog timer (esp32)
-  if (serialDebug) Serial.println("Configuring watchdog timer");
+  Serial.println("Configuring watchdog timer");
   esp_task_wdt_init(WDT_TIMEOUT, true);  //enable panic so ESP32 restarts
   esp_task_wdt_add(NULL);  //add current thread to WDT watch  
 
  // startup complete
-  if (serialDebug) Serial.println("\nStarted...");
-  flashLED(2);  // flash the onboard indicator led
-  brightLed(64);  // change bright LED
+  Serial.println("\nStarted...");
   delay(200);
-  brightLed(0);  // change bright LED
-
 }  // setup
 
 
@@ -310,7 +263,6 @@ void loop() {
   if ((unsigned long)(millis() - lastStatus) >= TimeBetweenStatus) {
   lastStatus = millis();  // reset timer
   esp_task_wdt_reset();  // reset watchdog timer (to prevent system restart)
-  digitalWrite(indicatorLED,!digitalRead(indicatorLED));  // flip indicator led status
   }
 
 }  // loop
@@ -356,17 +308,9 @@ if (reset) {
   config.fb_count = 1;  // if more than one, i2s runs in continuous mode. Use only with JPEG
 }
 
-  // check the esp32cam board has a psram chip installed (extra memory used for storing captured images)
-  //  Note: if not using "AI thinker esp32 cam" in the Arduino IDE, PSRAM must be enabled
-  if (!psramFound()) {
-  if (serialDebug) Serial.println("Warning: No PSRam found so defaulting to image size 'CIF'");
-  config.frame_size = FRAMESIZE_SVGA;
-  config.fb_location = CAMERA_FB_IN_DRAM;
-  }
-
   esp_err_t camerr = esp_camera_init(&config);  // initialise the camera
   if (camerr != ESP_OK) {
-  if (serialDebug) Serial.printf("ERROR: Camera init failed with error 0x%x", camerr);
+  Serial.printf("ERROR: Camera init failed with error 0x%x", camerr);
   }
 
   cameraImageSettings();  // apply the camera image settings
@@ -386,12 +330,12 @@ if (reset) {
 
 bool cameraImageSettings() {
 
-  if (serialDebug) Serial.println("Applying camera settings");
+  Serial.println("Applying camera settings");
 
   sensor_t *s = esp_camera_sensor_get();
   // something to try?:  if (s->id.PID == OV3660_PID)
   if (s == NULL) {
-  if (serialDebug) Serial.println("Error: problem reading camera sensor settings");
+  Serial.println("Error: problem reading camera sensor settings");
   return 0;
   }
 
@@ -446,37 +390,6 @@ bool cameraImageSettings() {
 //  s->set_ae_level(s, 0);  // auto exposure levels (-2 to 2)
 //  s->set_bpc(s, 0);  // black pixel correction
 //  s->set_wpc(s, 0);  // white pixel correction
-
-
-// -------
-//  set up PWM for the illumination LED (flash)
-// -------
-// note: I am not sure PWM is very reliable on the esp32cam - requires more testing
-void setupFlashPWM() {
-  ledcSetup(ledChannel, ledFreq, ledRresolution);
-  ledcAttachPin(brightLED, ledChannel);
-  brightLed(brightLEDbrightness);
-}
-
-// change illumination LED brightness
- void brightLed(byte ledBrightness){
-  brightLEDbrightness = ledBrightness;  // store setting
-  ledcWrite(ledChannel, ledBrightness);  // change LED brightness (0 - 255)
-  if (serialDebug) Serial.println("LED brightness changed to " + String(ledBrightness) );
- }
-
-
-// -------
-//  flash the indicator led 'reps' number of times
-// -------
-void flashLED(int reps) {
- for(int x=0; x < reps; x++) {
-  digitalWrite(indicatorLED,LOW);
-  delay(1000);
-  digitalWrite(indicatorLED,HIGH);
-  delay(500);
- }
-}
 
 
 // -------
@@ -573,7 +486,7 @@ void changeResolution() {
   FRAME_SIZE_IMAGE = cyclingRes[currentRes];
 
   initialiseCamera(1);
-  if (serialDebug) Serial.println("Camera resolution changed to " + String(cyclingRes[currentRes]));
+  Serial.println("Camera resolution changed to " + String(cyclingRes[currentRes]));
   ImageResDetails = "Unknown";  // set next time image captured
 }
 
@@ -586,7 +499,7 @@ void handleNotFound() {
 
  String tReply;
 
- if (serialDebug) Serial.print("Invalid page requested");
+ Serial.print("Invalid page requested");
 
  tReply = "File Not Found\n\n";
  tReply += "URI: ";
@@ -623,7 +536,7 @@ bool handleJPG() {
   fb = NULL; // reset to capture errors
   fb = esp_camera_fb_get(); // get fresh image
   if (!fb) {
-  if (serialDebug) Serial.println("Error: failed to capture image");
+  Serial.println("Error: failed to capture image");
   return 0;
   }
 
@@ -653,34 +566,3 @@ bool handleJPG() {
 
 }  // handleJPG
 
-// -------
-//  resize grayscale image
-// -------
-// Thanks to Bard A.I. for writing this for me ;-)
-//  src_buf: The source image buffer.
-//  src_width: The width of the source image buffer.
-//  src_height: The height of the source image buffer.
-//  dst_buf: The destination image buffer.
-//  dst_width: The width of the destination image buffer.
-//  dst_height: The height of the destination image buffer.
-void resize_esp32cam_image_buffer(uint8_t* src_buf, int src_width, int src_height,
-  uint8_t* dst_buf, int dst_width, int dst_height) {
-  // Calculate the horizontal and vertical resize ratios.
-  float h_ratio = (float)src_width / dst_width;
-  float v_ratio = (float)src_height / dst_height;
-
-  // Iterate over the destination image buffer and write the resized pixels.
-  for (int y = 0; y < dst_height; y++) {
-  for (int x = 0; x < dst_width; x++) {
-  // Calculate the source pixel coordinates.
-  int src_x = (int)(x * h_ratio);
-  int src_y = (int)(y * v_ratio);
-
-  // Read the source pixel value.
-  uint8_t src_pixel = src_buf[src_y * src_width + src_x];
-
-  // Write the resized pixel value to the destination image buffer.
-  dst_buf[y * dst_width + x] = src_pixel;
-  }
-  }
-}
